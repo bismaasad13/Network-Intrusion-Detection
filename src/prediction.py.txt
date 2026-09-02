@@ -1,0 +1,80 @@
+import joblib
+import numpy as np
+import pandas as pd
+
+
+# Load trained model
+MODEL_PATH = "../models/nids_xgboost_model.joblib"
+
+artifact = joblib.load(MODEL_PATH)
+
+model = artifact["model"]
+imputer = artifact["imputer"]
+label_encoder = artifact["label_encoder"]
+feature_names = artifact["feature_names"]
+
+
+def predict_intrusion(record_df):
+    """
+    Predict the type of network traffic/attack
+    for a single record.
+    """
+
+    record_df = record_df.copy()
+
+    # Standardize column names
+    record_df.columns = (
+        record_df.columns
+        .astype(str)
+        .str.strip()
+        .str.replace(
+            r"[^A-Za-z0-9_]+",
+            "_",
+            regex=True
+        )
+        .str.strip("_")
+    )
+
+    # Keep the same features used during training
+    record_df = record_df.reindex(
+        columns=feature_names
+    )
+
+    # Apply the trained imputer
+    X = imputer.transform(record_df)
+
+    # Make prediction
+    prediction_id = model.predict(X)[0]
+
+    # Convert encoded value back to class name
+    prediction = label_encoder.inverse_transform(
+        [prediction_id]
+    )[0]
+
+    result = {
+        "prediction": prediction
+    }
+
+    # Get prediction confidence
+    if hasattr(model, "predict_proba"):
+
+        probabilities = model.predict_proba(X)[0]
+
+        result["confidence"] = float(
+            np.max(probabilities)
+        )
+
+    # Determine risk level
+    if prediction == "Benign":
+
+        result["risk_level"] = "LOW"
+
+    elif result.get("confidence", 0) >= 0.70:
+
+        result["risk_level"] = "HIGH"
+
+    else:
+
+        result["risk_level"] = "MEDIUM"
+
+    return result
